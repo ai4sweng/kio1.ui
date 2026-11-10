@@ -29,7 +29,11 @@ Node.js 18+ is required only for tests:
 make check
 ```
 
-Tests cover existing workflow edits, deletion and dependency cleanup, canonical capabilities, dispatch payloads, busy controls, static assets, settings initialization, safe text insertion, and failed settings requests. No KIO1 checkout or running model is required.
+Tests cover existing workflow edits, deletion and dependency cleanup, canonical capabilities, dispatch payloads, busy controls, static assets, settings initialization, model refresh, processing animation and cleanup, reduced motion, safe text insertion, and failed requests. No KIO1 checkout or running model is required.
+
+The model badge uses KIO1's `/api/settings` `model_name` field, which reflects backend `config.model`. Settings bypass the browser cache at startup and refresh alongside each chat request. A failed refresh displays `Model unavailable` rather than a stale model name, without blocking chat. Backend configuration changes must first be loaded by KIO1; editing a configuration file alone does not update a running backend.
+
+While awaiting a response, chat displays `Processing <submitted query>` with a typewriter effect and blinking cursor. This is a waiting indicator, not streamed model reasoning or progress. Reduced-motion preferences show the full text without animation. The pending message and timer are removed on success or failure.
 
 See [Development](docs/development.md) for implementation guidance and [Operations](docs/operations.md) for proxy behavior and troubleshooting.
 

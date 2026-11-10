@@ -401,6 +401,7 @@
   }
 
   async function sendQuery(query) {
+    void refreshModelName();
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -431,6 +432,35 @@
     };
   }
 
+  /** @param {string} query Submitted text. @returns {{stop: function(): void}} Pending status cleanup. */
+  function showProcessingMessage(query) {
+    const text = `Processing ${query}`;
+    const pending = appendMessage("assistant", {
+      html: `<span class="processing-status" role="status" aria-label="${escapeHtml(text)}"><span class="processing-reserve" aria-hidden="true">${escapeHtml(text)}</span><span class="processing-text" aria-hidden="true"></span></span>`,
+    });
+    pending.classList.add("message-pending");
+    const visual = pending.querySelector(".processing-text");
+    const characters = Array.from(text);
+    let timer;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      visual.textContent = text;
+    } else {
+      let position = 0;
+      const chunkSize = Math.max(1, Math.ceil(characters.length / 160));
+      timer = window.setInterval(() => {
+        position = Math.min(characters.length, position + chunkSize);
+        visual.textContent = characters.slice(0, position).join("");
+        if (position === characters.length) window.clearInterval(timer);
+      }, 35);
+    }
+    return {
+      stop() {
+        window.clearInterval(timer);
+        pending.remove();
+      },
+    };
+  }
+
   formEl.addEventListener("submit", async (event) => {
     event.preventDefault();
     const query = inputEl.value.trim();
@@ -440,14 +470,11 @@
     inputEl.value = "";
     resizeInput();
     setInterfaceBusy(true);
-    const pendingMessage = appendMessage("assistant", {
-      html: '<span role="status" aria-label="Thinking">Thinking<span class="thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>',
-    });
-    pendingMessage.classList.add("message-pending");
+    const pendingMessage = showProcessingMessage(query);
 
     try {
       const response = await sendQuery(query);
-      pendingMessage.remove();
+      pendingMessage.stop();
       appendMessage("assistant", response);
       try {
         await refreshConversationList();
@@ -455,7 +482,7 @@
         setHistoryStatus(error.message, true);
       }
     } catch {
-      pendingMessage.remove();
+      pendingMessage.stop();
       appendMessage("assistant", {
         text: "Network error: could not reach the orchestrator.",
         isError: true,
@@ -602,13 +629,27 @@
     });
   });
 
+  /** @returns {Promise<void>} Refresh the configured model without blocking chat on settings failure. */
+  async function refreshModelName() {
+    const modelNameEl = document.getElementById("model-name");
+    try {
+      const settings = await fetchJson("/api/settings", { cache: "no-store" });
+      if (typeof settings.model_name !== "string" || !settings.model_name.trim()) {
+        throw new Error("Invalid model name.");
+      }
+      modelNameEl.textContent = settings.model_name;
+    } catch {
+      modelNameEl.textContent = "Model unavailable";
+    }
+  }
+
   async function initializeUI() {
     setInterfaceBusy(true);
     newChatButtonEl.disabled = true;
     fileInputEls.forEach((element) => { element.disabled = true; });
     appShellEl.dataset.workflowEnabled = "false";
     try {
-      const settings = await fetchJson("/api/settings");
+      const settings = await fetchJson("/api/settings", { cache: "no-store" });
       if (typeof settings.model_name !== "string" ||
           typeof settings.workflow_enabled !== "boolean" ||
           !settings.capability_catalog || typeof settings.capability_catalog !== "object" ||

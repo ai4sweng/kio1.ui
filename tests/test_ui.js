@@ -10,10 +10,11 @@ const vm = require("node:vm");
 function control() {
   return {
     disabled: false, dataset: {}, style: {}, value: "", listeners: {},
-    classList: { toggle() {} },
+    classList: { toggle() {}, add() {} },
     addEventListener(name, handler) { this.listeners[name] = handler; },
     querySelector() { return control(); },
     querySelectorAll() { return []; },
+    replaceChildren() {},
     setAttribute() {}, focus() {},
   };
 }
@@ -23,6 +24,8 @@ function loadUI(fetchOverride) {
   const elements = new Map();
   const requests = [];
   const controls = [];
+  const messages = [];
+  const timers = new Map();
   const catalog = { KIO7: { capabilities: ["generate_vitis_config", "review_config"] } };
   const document = {
     getElementById(id) {
@@ -33,10 +36,17 @@ function loadUI(fetchOverride) {
     addEventListener() {},
   };
   document.getElementById("capability-catalog").textContent = JSON.stringify(catalog);
+  document.getElementById("model-name").textContent = "";
   document.getElementById("messages").querySelectorAll = () => controls;
   const context = vm.createContext({
     document,
-    window: { addEventListener() {}, confirm: () => true },
+    recordedMessages: messages,
+    window: {
+      addEventListener() {}, confirm: () => true,
+      matchMedia: () => ({ matches: false }),
+      setInterval(callback) { const id = {}; timers.set(id, callback); return id; },
+      clearInterval(id) { timers.delete(id); },
+    },
     fetch: fetchOverride ?? (async (url, options) => {
       requests.push({ url, body: JSON.parse(options.body) });
       return { ok: true, json: async () => ({ status: "succeeded" }) };
@@ -45,13 +55,23 @@ function loadUI(fetchOverride) {
   const source = fs.readFileSync(path.join(__dirname, "../static/app.js"), "utf8");
   vm.runInContext(source.replace("  initializeUI();", `
     capabilityCatalog = ${JSON.stringify(catalog)};
-    appendMessage = () => ({ remove() {} });
+    appendMessage = (role, content) => {
+      const visual = { textContent: "" };
+      const message = {
+        role, content, visual, removed: false,
+        classList: { add() {} },
+        querySelector: () => visual,
+        remove() { this.removed = true; },
+      };
+      recordedMessages.push(message);
+      return message;
+    };
     renderGenericJson = () => "";
     initializeConversationHistory = async () => { setInterfaceBusy(false); };
-    globalThis.ui = { renderPlanStep, setInterfaceBusy, initializeUI };
+    globalThis.ui = { renderPlanStep, setInterfaceBusy, initializeUI, sendQuery, showProcessingMessage };
   `), context);
   return {
-    ...context.ui, requests, controls, elements,
+    ...context.ui, requests, controls, elements, messages, timers, window: context.window,
     input: elements.get("query-input"),
     click: elements.get("messages").listeners.click,
   };
@@ -154,6 +174,119 @@ for (const failure of ["network", "http", "malformed"]) {
     assert.equal(ui.elements.get("new-chat-button").disabled, true);
     assert.equal(ui.elements.get("app-shell").dataset.workflowEnabled, "false");
     assert.ok(ui.elements.get("history-status").textContent);
+  });
+}
+
+test("each chat refreshes the configured model from uncached settings", async () => {
+  let model = "first-model";
+  const ui = loadUI(async (url, options) => {
+    if (url === "/api/settings") {
+      assert.equal(options.cache, "no-store");
+      return { ok: true, json: async () => ({ model_name: model }) };
+    }
+    assert.equal(url, "/api/chat");
+    return { ok: true, json: async () => ({ formatted: "{}" }) };
+  });
+  await ui.sendQuery("First query");
+  assert.equal(ui.elements.get("model-name").textContent, "first-model");
+  model = "replacement-model";
+  await ui.sendQuery("Second query");
+  assert.equal(ui.elements.get("model-name").textContent, "replacement-model");
+});
+
+for (const failure of ["network", "malformed"]) {
+  test(`${failure} model refresh clears stale text without preventing chat`, async () => {
+    const ui = loadUI(async (url) => {
+      if (url === "/api/settings") {
+        if (failure === "network") throw new Error("Unavailable");
+        return { ok: true, json: async () => ({ model_name: " " }) };
+      }
+      return { ok: true, json: async () => ({ formatted: "{}" }) };
+    });
+    ui.elements.get("model-name").textContent = "stale-model";
+    assert.equal((await ui.sendQuery("Query")).html, "");
+    assert.equal(ui.elements.get("model-name").textContent, "Model unavailable");
+  });
+}
+
+test("a slow model refresh does not delay the inference request", async () => {
+  let releaseSettings;
+  let chatStarted = false;
+  const ui = loadUI(async (url) => {
+    if (url === "/api/settings") {
+      return new Promise((resolve) => { releaseSettings = resolve; });
+    }
+    chatStarted = true;
+    return { ok: true, json: async () => ({ formatted: "{}" }) };
+  });
+  await ui.sendQuery("Query");
+  assert.equal(chatStarted, true);
+  releaseSettings({ ok: true, json: async () => ({ model_name: "current-model" }) });
+});
+
+test("processing text types the escaped query and cleans up its timer", () => {
+  const ui = loadUI();
+  const query = '<img src=x onerror="alert(1)"> \u{1f680}';
+  const pending = ui.showProcessingMessage(query);
+  const message = ui.messages[0];
+  assert.doesNotMatch(message.content.html, /<img/);
+  assert.match(message.content.html, /&lt;img/);
+  assert.match(message.content.html, /role="status" aria-label="Processing/);
+  assert.equal(message.visual.textContent, "");
+  const tick = [...ui.timers.values()][0];
+  tick();
+  assert.ok(message.visual.textContent.length > 0);
+  assert.ok(message.visual.textContent.length < `Processing ${query}`.length);
+  for (let index = 0; index < 160; index += 1) tick();
+  assert.equal(message.visual.textContent, `Processing ${query}`);
+  assert.equal(ui.timers.size, 0);
+  pending.stop();
+  assert.equal(message.removed, true);
+});
+
+test("reduced motion displays the full processing query without a timer", () => {
+  const ui = loadUI();
+  ui.window.matchMedia = () => ({ matches: true });
+  const pending = ui.showProcessingMessage("Inspect fleet");
+  assert.equal(ui.messages[0].visual.textContent, "Processing Inspect fleet");
+  assert.equal(ui.timers.size, 0);
+  pending.stop();
+  assert.equal(ui.messages[0].removed, true);
+});
+
+for (const outcome of ["success", "network", "http", "malformed"]) {
+  test(`${outcome} chat completion removes pending text and stops animation`, async () => {
+    let finishChat;
+    const ui = loadUI(async (url) => {
+      if (url === "/api/settings") {
+        return { ok: true, json: async () => ({ model_name: "current-model" }) };
+      }
+      if (url === "/api/conversations") {
+        return { ok: true, json: async () => ({ active_id: null, conversations: [] }) };
+      }
+      return new Promise((resolve, reject) => {
+        finishChat = () => {
+          if (outcome === "network") return reject(new Error("Offline"));
+          resolve({
+            ok: outcome === "success", status: outcome === "success" ? 200 : 503,
+            json: async () => {
+              if (outcome === "malformed") throw new Error("Invalid JSON");
+              return outcome === "success" ? { formatted: "{}" } : { error: "Unavailable" };
+            },
+          });
+        };
+      });
+    });
+    ui.input.value = "Inspect fleet";
+    const submitted = ui.elements.get("chat-form").listeners.submit({ preventDefault() {} });
+    assert.equal(ui.input.disabled, true);
+    assert.equal(ui.timers.size, 1);
+    finishChat();
+    await submitted;
+    assert.equal(ui.messages[1].removed, true);
+    assert.equal(ui.timers.size, 0);
+    assert.equal(ui.input.disabled, false);
+    assert.equal(Boolean(ui.messages[2].content.isError), outcome !== "success");
   });
 }
 

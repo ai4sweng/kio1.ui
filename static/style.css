@@ -385,40 +385,36 @@ body {
   width: auto;
 }
 
-.thinking-dots {
-  display: inline-flex;
-  width: 1em;
-  justify-content: space-evenly;
+.processing-status {
+  display: grid;
+  overflow-wrap: anywhere;
 }
 
-.thinking-dots > span {
-  display: inline-block;
+.processing-reserve,
+.processing-text {
+  grid-area: 1 / 1;
+  min-width: 0;
+  padding-right: 0.6em;
+}
+
+.processing-reserve {
+  visibility: hidden;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .thinking-dots > span {
-    animation: thinking-dot 1.2s ease-in-out infinite;
-  }
-
-  .thinking-dots > span:nth-child(2) {
-    animation-delay: 0.2s;
-  }
-
-  .thinking-dots > span:nth-child(3) {
-    animation-delay: 0.4s;
+  .processing-text::after {
+    content: "";
+    display: inline-block;
+    height: 1em;
+    margin-left: 0.15em;
+    border-right: 2px solid currentColor;
+    vertical-align: text-bottom;
+    animation: processing-cursor 1s step-end infinite;
   }
 }
 
-@keyframes thinking-dot {
-  0%, 60%, 100% {
-    opacity: 0.4;
-    transform: translateY(0);
-  }
-
-  30% {
-    opacity: 1;
-    transform: translateY(-0.2em);
-  }
+@keyframes processing-cursor {
+  50% { opacity: 0; }
 }
 
 .bubble-json {
