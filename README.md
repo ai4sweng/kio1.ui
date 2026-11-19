@@ -43,6 +43,8 @@ On the server, run `make server-build && make server-run`. These are aliases for
 
 Use `make logs`, `make status`, `make stop`, and `docker start kio-ui` to manage the existing container. Rebuild after frontend or proxy edits. For detached replacements, stop and rename the old `kio-ui` container before relaunching; do not prune unrelated containers.
 
+If an older container fails with `Permission denied` on the Nginx template, rebuild with `make server-build` and recreate the container. `docker start` still uses the old image.
+
 `/health` checks UI serving only. Backend settings are loaded before chat/history initialization. Failure leaves chat input and workflow dispatch disabled; reload after KIO1 recovers. No workflow is replayed or dispatched automatically. Proxy failures remain visible to the browser and nginx logs.
 
 UI publishes only to loopback. For remote access use an SSH tunnel or an authenticated reverse proxy; do not expose the single-operator application publicly. Same-origin requests preserve existing API methods, bodies, statuses, and headers without CORS changes. Uploads retain the 2 GiB limit; workflow requests retain KIO1's 1 MiB limit. Proxy buffering and retries are disabled, with a one-hour response timeout to avoid truncating configured long model/workflow requests. This does not add authentication or durable workflows.
