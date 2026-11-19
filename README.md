@@ -39,7 +39,9 @@ See [Development](docs/development.md) for implementation guidance and [Operatio
 
 ## Operations
 
-Use `make up` for detached mode with `unless-stopped`; `make logs`, `make status`, `make stop`, and `docker start kio-ui` manage the existing container. Rebuild after frontend or proxy edits. For detached replacements, stop and rename the old `kio-ui` container before relaunching; do not prune unrelated containers.
+On the server, run `make server-build && make server-run`. These are aliases for `make build` and `make up`: the UI starts detached with `unless-stopped` and keeps running after SSH logout. It still binds to the server's loopback interface. From your laptop, run `ssh -N -L 5000:127.0.0.1:5000 LOGIN@SERVER` and open [http://127.0.0.1:5000](http://127.0.0.1:5000). Closing the tunnel stops browser access, not the UI.
+
+Use `make logs`, `make status`, `make stop`, and `docker start kio-ui` to manage the existing container. Rebuild after frontend or proxy edits. For detached replacements, stop and rename the old `kio-ui` container before relaunching; do not prune unrelated containers.
 
 `/health` checks UI serving only. Backend settings are loaded before chat/history initialization. Failure leaves chat input and workflow dispatch disabled; reload after KIO1 recovers. No workflow is replayed or dispatched automatically. Proxy failures remain visible to the browser and nginx logs.
 

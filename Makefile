@@ -5,9 +5,9 @@ UI_PORT ?= 5000
 KIO_NETWORK ?= kio1-network
 KIO1_API_URL ?= http://kio1:5000
 
-.PHONY: help test check build network run up logs status stop down
+.PHONY: help test check build network run up server-build server-run logs status stop down
 help:
-	@printf 'Targets: test check build run up logs status stop down\n'
+	@printf 'Targets: test check build run up server-build server-run logs status stop down\n'
 test:
 	node --test tests/test_ui.js
 check: test
@@ -20,6 +20,8 @@ run: network
 	$(DOCKER) run --rm --name kio-ui --network "$(KIO_NETWORK)" -p 127.0.0.1:$(UI_PORT):8080 -e KIO1_API_URL="$(KIO1_API_URL)" $(UI_IMAGE)
 up: network
 	$(DOCKER) run -d --name kio-ui --restart unless-stopped --network "$(KIO_NETWORK)" -p 127.0.0.1:$(UI_PORT):8080 -e KIO1_API_URL="$(KIO1_API_URL)" $(UI_IMAGE)
+server-build: build
+server-run: up
 logs:
 	$(DOCKER) logs -f kio-ui
 status:
